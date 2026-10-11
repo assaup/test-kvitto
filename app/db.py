@@ -3,12 +3,30 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import DateTime, Dialect, Engine, TypeDecorator, create_engine, event
+from sqlalchemy import (
+    DateTime,
+    Dialect,
+    Engine,
+    MetaData,
+    TypeDecorator,
+    create_engine,
+    event,
+)
 from sqlalchemy.orm import DeclarativeBase, Session
 
 
 class Base(DeclarativeBase):
-    pass
+    # Предсказуемые имена индексов и ограничений: Alembic сможет удалить или изменить их
+    # в будущих миграциях (на SQLite через batch-режим без имени ограничение не найти).
+    metadata = MetaData(
+        naming_convention={
+            "ix": "ix_%(column_0_label)s",
+            "uq": "uq_%(table_name)s_%(column_0_name)s",
+            "ck": "ck_%(table_name)s_%(constraint_name)s",
+            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+            "pk": "pk_%(table_name)s",
+        }
+    )
 
 
 class UTCDateTime(TypeDecorator[datetime]):

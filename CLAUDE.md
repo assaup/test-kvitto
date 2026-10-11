@@ -4,6 +4,7 @@
 
 ## Команды
 
+- Миграции: `alembic upgrade head`; новая — `alembic revision --autogenerate -m "..."`
 - Запуск: `uvicorn app.main:app --reload`
 - Тесты: `pytest`
 - Линтер и формат: `ruff check .` и `ruff format .`
@@ -44,6 +45,15 @@
 - Сравнение только через `hmac.compare_digest` по bytes; никаких `==`.
 - Без `WEBHOOK_SECRET` вебхуки отклоняются. Не добавлять секрет по умолчанию в код.
 - Тесты создают приложение через `create_app(make_settings(...))` — явные настройки, не `.env`.
+
+## Схема БД
+
+- Любое изменение моделей — только вместе с миграцией в `migrations/versions/`.
+  `create_all` в приложение не возвращать.
+- Автогенерированную миграцию читать построчно: типы приложения (`UTCDateTime`) заменять на базовые
+  `sa.*`, убирать дубли CHECK для `sa.Enum(create_constraint=True)`.
+- Имена ограничений задаёт naming convention в `app/db.py` — в моделях указывать короткое имя.
+- `tests/test_migrations.py` должен проходить: он ловит расхождение моделей и миграций.
 
 ## Код
 

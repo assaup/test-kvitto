@@ -23,7 +23,7 @@ def _str_enum(enum_cls: type[StrEnum], name: str) -> Enum:
 
 class Tariff(Base):
     __tablename__ = "tariffs"
-    __table_args__ = (CheckConstraint("price > 0", name="ck_tariffs_price_positive"),)
+    __table_args__ = (CheckConstraint("price > 0", name="price_positive"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(50), unique=True)
@@ -33,8 +33,8 @@ class Tariff(Base):
 class Payment(Base):
     __tablename__ = "payments"
     __table_args__ = (
-        CheckConstraint("amount > 0", name="ck_payments_amount_positive"),
-        CheckConstraint("discount >= 0", name="ck_payments_discount_non_negative"),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint("discount >= 0", name="discount_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

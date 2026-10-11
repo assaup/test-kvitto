@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -22,8 +20,8 @@ def test_list_tariffs_returns_seeded_tariffs_in_kopecks(client: TestClient) -> N
     assert all(type(tariff["price"]) is int for tariff in body)
 
 
-def test_tariffs_are_not_duplicated_on_restart(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
+def test_tariffs_are_not_duplicated_on_restart(database_url: str) -> None:
+    settings = make_settings(database_url)
 
     for _ in range(2):  # два запуска приложения на одной и той же БД
         with TestClient(create_app(settings)) as client:

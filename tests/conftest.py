@@ -1,9 +1,12 @@
 import json
+import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from httpx import Response
 from sqlalchemy import func, select
@@ -14,17 +17,44 @@ from app.models import Payment
 from app.signatures import sign
 
 WEBHOOK_SECRET = "test-webhook-secret"
+ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 
-def make_settings(tmp_path: Path, webhook_secret: str | None = WEBHOOK_SECRET) -> Settings:
-    """Явные настройки для тестов — не зависят от локального .env разработчика."""
-    # Файловая SQLite (а не :memory:) — чтобы потоки в конкурентных тестах видели одну БД.
-    return Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}", webhook_secret=webhook_secret)
+def alembic_config(database_url: str) -> Config:
+    config = Config(str(ALEMBIC_INI))
+    config.attributes["database_url"] = database_url  # читает migrations/env.py
+    return config
+
+
+def run_migrations(database_url: str) -> None:
+    command.upgrade(alembic_config(database_url), "head")
+
+
+@pytest.fixture(scope="session")
+def migrated_db_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Схема из миграций — та же, что в продакшене. Создаётся один раз на все тесты."""
+    path = tmp_path_factory.mktemp("template") / "template.db"
+    run_migrations(f"sqlite:///{path}")
+    return path
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
-    with TestClient(create_app(make_settings(tmp_path))) as test_client:  # with запускает lifespan
+def database_url(tmp_path: Path, migrated_db_template: Path) -> str:
+    """Каждому тесту — своя копия мигрированной БД. Файловая SQLite (а не :memory:) —
+    чтобы потоки в конкурентных тестах видели одну БД."""
+    path = tmp_path / "test.db"
+    shutil.copy(migrated_db_template, path)
+    return f"sqlite:///{path}"
+
+
+def make_settings(database_url: str, webhook_secret: str | None = WEBHOOK_SECRET) -> Settings:
+    """Явные настройки для тестов — не зависят от локального .env разработчика."""
+    return Settings(database_url=database_url, webhook_secret=webhook_secret)
+
+
+@pytest.fixture
+def client(database_url: str) -> Iterator[TestClient]:
+    with TestClient(create_app(make_settings(database_url))) as test_client:  # запуск lifespan
         yield test_client
 
 

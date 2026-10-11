@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import json
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -119,9 +118,9 @@ def test_unsigned_invalid_body_returns_401_not_422(client: TestClient) -> None:
 
 @pytest.mark.parametrize("secret", [None, ""])
 def test_webhooks_are_rejected_when_secret_is_not_configured(
-    tmp_path: Path, secret: str | None
+    database_url: str, secret: str | None
 ) -> None:
-    with TestClient(create_app(make_settings(tmp_path, webhook_secret=secret))) as client:
+    with TestClient(create_app(make_settings(database_url, webhook_secret=secret))) as client:
         payment_id = client.post("/payments", json=payment_payload()).json()["id"]
         body = webhook_body(payment_id)
         # Даже подпись, посчитанная с пустым ключом, не должна проходить.

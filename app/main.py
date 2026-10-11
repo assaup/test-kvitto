@@ -3,11 +3,12 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy import inspect
 from sqlalchemy.orm import sessionmaker
 
-from app import models  # noqa: F401  — регистрирует таблицы в Base.metadata
+from app import models
 from app.config import Settings, settings
-from app.db import Base, make_engine
+from app.db import make_engine
 from app.errors import ApiError, api_error_handler
 from app.routers import payments, tariffs, webhooks
 from app.seed import seed_tariffs
@@ -25,7 +26,10 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         if not app_settings.webhook_secret:
             logger.warning("WEBHOOK_SECRET не задан: все вебхуки банка будут отклоняться с 401")
-        Base.metadata.create_all(engine)
+        # Схему создают только миграции Alembic — отдельным шагом, а не при старте приложения:
+        # иначе несколько воркеров запускали бы миграции одновременно.
+        if not inspect(engine).has_table(models.Tariff.__tablename__):
+            raise RuntimeError("База не инициализирована: выполните `alembic upgrade head`")
         with session_factory() as session:
             seed_tariffs(session)
         yield
