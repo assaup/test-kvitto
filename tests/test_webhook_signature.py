@@ -105,15 +105,55 @@ def test_non_ascii_signature_returns_401_not_500(client: TestClient, payment_id:
     assert response.status_code == 401
 
 
-def test_unsigned_invalid_body_returns_401_not_422(client: TestClient) -> None:
-    """Без подписи не подсказываем 422, какие поля неверны: сначала проверяем подпись."""
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"payment_id": "x", "status": "paid"}',  # корректный JSON, неверные поля
+        b"not json",  # битый JSON — FastAPI разобрал бы его раньше зависимостей
+        b'{"payment_id": ',
+        b"",
+    ],
+)
+def test_unsigned_request_returns_401_before_body_parsing(client: TestClient, body: bytes) -> None:
+    """Без подписи не подсказываем 422 о том, что не так с телом: сначала подпись."""
     response = client.post(
-        "/webhooks/bank",
-        content=b'{"payment_id": "x", "status": "paid"}',
-        headers={"Content-Type": "application/json"},
+        "/webhooks/bank", content=body, headers={"Content-Type": "application/json"}
     )
 
     assert response.status_code == 401
+    assert response.json() == {"error": "invalid_signature"}
+
+
+def test_signed_malformed_json_returns_422(client: TestClient) -> None:
+    body = b"not json"
+
+    response = client.post("/webhooks/bank", content=body, headers=signed_headers(body))
+
+    assert response.status_code == 422
+
+
+def test_signature_is_checked_on_raw_bytes(client: TestClient, payment_id: str) -> None:
+    """Тело не в «каноничном» виде json.dumps: другой порядок ключей, без пробелов после
+    запятой, лишние пробелы. Подпись — от этих байтов. Если сервер станет пересобирать JSON
+    перед проверкой, байты изменятся и подпись не сойдётся."""
+    body = f'{{"status":"succeeded",   "payment_id":"{payment_id}"}}'.encode()
+
+    response = client.post("/webhooks/bank", content=body, headers=signed_headers(body))
+
+    assert response.status_code == 200
+    assert_status(client, payment_id, "succeeded")
+
+
+def test_signature_of_reformatted_json_is_rejected(client: TestClient, payment_id: str) -> None:
+    """Подписан тот же JSON, но в другом форматировании, — это другие байты, подпись неверна."""
+    sent_body = f'{{"status":"succeeded","payment_id":"{payment_id}"}}'.encode()
+    reformatted = json.dumps(json.loads(sent_body)).encode()
+    assert reformatted != sent_body
+
+    response = client.post("/webhooks/bank", content=sent_body, headers=signed_headers(reformatted))
+
+    assert response.status_code == 401
+    assert_status(client, payment_id, "pending")
 
 
 @pytest.mark.parametrize("secret", [None, ""])
