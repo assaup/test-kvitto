@@ -49,3 +49,7 @@ class Payment(Base):
     discount: Mapped[int] = mapped_column(Integer)  # скидка, копейки
     schedule: Mapped[list[int] | None] = mapped_column(JSON)  # платежи рассрочки, копейки
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=lambda: datetime.now(UTC))
+    # UNIQUE — главная защита от дублей: даже при гонке двух запросов БД пропустит только один.
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # SHA-256 тела запроса: тот же ключ с другим телом → 409, а не чужой платёж.
+    request_hash: Mapped[str | None] = mapped_column(String(64))
