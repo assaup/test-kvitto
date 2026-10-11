@@ -11,7 +11,7 @@ pytest + httpx, ruff, Docker Compose, GitHub Actions.
 Нужен Docker (для PostgreSQL). Всё в контейнерах — одной командой:
 
 ```bash
-git clone <repo-url> kvitto-payments && cd kvitto-payments
+git clone https://github.com/assaup/test-kvitto.git kvitto-payments && cd kvitto-payments
 docker compose up --build
 ```
 
