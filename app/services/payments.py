@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.enums import PaymentStatus
 from app.models import Payment, Tariff
 from app.money import calculate_price, get_discount_percent, split_into_installments
 from app.schemas import PaymentCreate
@@ -39,6 +40,26 @@ def get_payment(session: Session, raw_id: str | int) -> Payment | None:
     if payment_id is None:
         return None
     return session.get(Payment, payment_id)
+
+
+def list_payments(
+    session: Session,
+    *,
+    email: str | None,
+    status: PaymentStatus | None,
+    limit: int,
+    offset: int,
+) -> list[Payment]:
+    query = select(Payment)
+    if email is not None:
+        # Email хранится в нижнем регистре (см. PaymentCreate) — ищем так же.
+        query = query.where(Payment.email == email.strip().lower())
+    if status is not None:
+        query = query.where(Payment.status == status)
+    # Новые сначала; id — второй ключ сортировки, чтобы при одинаковом created_at
+    # порядок был стабильным и страницы не перемешивались.
+    query = query.order_by(Payment.created_at.desc(), Payment.id).limit(limit).offset(offset)
+    return list(session.scalars(query))
 
 
 def find_by_idempotency_key(session: Session, key: str) -> Payment | None:

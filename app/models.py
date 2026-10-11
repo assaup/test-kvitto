@@ -38,11 +38,12 @@ class Payment(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # Индексы на status и email — по ним фильтрует GET /payments.
     status: Mapped[PaymentStatus] = mapped_column(
-        _str_enum(PaymentStatus, "payment_status"), default=PaymentStatus.PENDING
+        _str_enum(PaymentStatus, "payment_status"), default=PaymentStatus.PENDING, index=True
     )
     tariff_id: Mapped[int] = mapped_column(ForeignKey("tariffs.id"))
-    email: Mapped[str] = mapped_column(String(320))
+    email: Mapped[str] = mapped_column(String(320), index=True)
     method: Mapped[PaymentMethod] = mapped_column(_str_enum(PaymentMethod, "payment_method"))
     installment_months: Mapped[int | None] = mapped_column(Integer)
     amount: Mapped[int] = mapped_column(Integer)  # к оплате, копейки

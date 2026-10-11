@@ -1,9 +1,11 @@
+import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import func, select
 
 from app.config import Settings
@@ -28,6 +30,12 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 def signed_headers(body: bytes, secret: str = WEBHOOK_SECRET) -> dict[str, str]:
     return {"Content-Type": "application/json", "X-Signature": sign(secret, body)}
+
+
+def send_webhook(client: TestClient, payment_id: str | int, status: str) -> Response:
+    """Подписанный вебхук банка."""
+    body = json.dumps({"payment_id": payment_id, "status": status}).encode()
+    return client.post("/webhooks/bank", content=body, headers=signed_headers(body))
 
 
 @pytest.fixture

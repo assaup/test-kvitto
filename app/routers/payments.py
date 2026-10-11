@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Response, status
+from fastapi import APIRouter, Header, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 
 from app.db import SessionDep
+from app.enums import PaymentStatus
 from app.errors import ApiError
-from app.schemas import PaymentCreate, PaymentOut
+from app.schemas import DB_INT_MAX, PaymentCreate, PaymentOut
 from app.services import payments as payment_service
 
 router = APIRouter(tags=["payments"])
@@ -49,6 +50,23 @@ def create_payment(
     if not created:
         response.status_code = status.HTTP_200_OK
     return PaymentOut.model_validate(payment)
+
+
+@router.get("/payments")
+def list_payments(
+    session: SessionDep,
+    email: Annotated[str | None, Query(max_length=320)] = None,
+    # Параметр называется payment_status, чтобы не перекрыть модуль fastapi.status;
+    # в URL он по-прежнему ?status=...
+    payment_status: Annotated[PaymentStatus | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    # Верхняя граница: огромный offset иначе ронял бы запрос в БД с 500 вместо 422.
+    offset: Annotated[int, Query(ge=0, le=DB_INT_MAX)] = 0,
+) -> list[PaymentOut]:
+    payments = payment_service.list_payments(
+        session, email=email, status=payment_status, limit=limit, offset=offset
+    )
+    return [PaymentOut.model_validate(payment) for payment in payments]
 
 
 @router.get(

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from tests.conftest import payment_payload, signed_headers
+from tests.conftest import payment_payload, send_webhook, signed_headers
 
 STATUSES = ["pending", "succeeded", "failed", "refunded"]
 
@@ -25,11 +25,6 @@ PATH_TO_STATUS = {
     "failed": ["failed"],
     "refunded": ["succeeded", "refunded"],
 }
-
-
-def send_webhook(client: TestClient, payment_id: str | int, status: str) -> Response:
-    body = json.dumps({"payment_id": payment_id, "status": status}).encode()
-    return client.post("/webhooks/bank", content=body, headers=signed_headers(body))
 
 
 @pytest.fixture
