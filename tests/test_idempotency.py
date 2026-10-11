@@ -40,6 +40,36 @@ def test_same_key_with_equivalent_body_is_a_replay(
     assert count_payments() == 1
 
 
+def test_same_key_with_email_in_other_case_is_a_replay(
+    client: TestClient, count_payments: Callable[[], int]
+) -> None:
+    headers = {"Idempotency-Key": "order-42"}
+
+    first = client.post(
+        "/payments", json=payment_payload(email="student@example.com"), headers=headers
+    )
+    second = client.post(
+        "/payments", json=payment_payload(email="Student@Example.com"), headers=headers
+    )
+
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert count_payments() == 1
+
+
+def test_huge_tariff_id_with_key_returns_422_not_500(
+    client: TestClient, count_payments: Callable[[], int]
+) -> None:
+    response = client.post(
+        "/payments",
+        json=payment_payload(tariff_id=9_223_372_036_854_775_808),
+        headers={"Idempotency-Key": "order-42"},
+    )
+
+    assert response.status_code == 422
+    assert count_payments() == 0
+
+
 def test_same_key_with_different_body_returns_409(
     client: TestClient, count_payments: Callable[[], int]
 ) -> None:

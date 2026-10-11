@@ -72,6 +72,13 @@ def test_installment_schedule_sums_to_amount(
     assert sum(body["schedule"]) == body["amount"]
 
 
+def test_email_is_normalized_to_lowercase(client: TestClient) -> None:
+    response = client.post("/payments", json=payment_payload(email="Student@Example.COM"))
+
+    assert response.status_code == 201
+    assert response.json()["email"] == "student@example.com"
+
+
 def test_get_payment_returns_created_payment(client: TestClient) -> None:
     created = client.post(
         "/payments", json=payment_payload(method="installment", installment_months=6)
@@ -103,12 +110,19 @@ def test_get_payment_with_malformed_id_returns_422(client: TestClient) -> None:
         ({"method": "card", "installment_months": 3}, None),  # срок без рассрочки
         ({"method": "installment", "installment_months": 4}, "installment_months"),
         ({"method": "installment", "installment_months": "3"}, "installment_months"),
+        ({"method": "installment", "installment_months": 3.0}, "installment_months"),
+        ({"method": "installment", "installment_months": True}, "installment_months"),
         ({"method": "cash"}, "method"),
         ({"promo_code": "KVITTO20"}, "promo_code"),
         ({"email": "not-an-email"}, "email"),
+        ({"email": "Иван <ivan@example.com>"}, "email"),  # не переписываем адрес молча
         ({"tariff_id": 999}, "tariff_id"),
+        ({"tariff_id": 2_147_483_647}, "tariff_id"),  # максимум INTEGER, но такого тарифа нет
+        ({"tariff_id": 2_147_483_648}, "tariff_id"),
+        ({"tariff_id": 9_223_372_036_854_775_808}, "tariff_id"),  # раньше — 500
         ({"tariff_id": 0}, "tariff_id"),
         ({"tariff_id": "2"}, "tariff_id"),
+        ({"tariff_id": 2.0}, "tariff_id"),
         ({"tariff_id": True}, "tariff_id"),
         ({"amount": 1}, "amount"),  # сумму задаёт сервер, клиент её передать не может
     ],

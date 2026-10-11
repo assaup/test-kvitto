@@ -5,7 +5,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.enums import PaymentMethod
 from app.models import Payment, Tariff
 from app.money import calculate_price, get_discount_percent, split_into_installments
 from app.schemas import PaymentCreate
@@ -54,9 +53,9 @@ def create_payment(
 
     # Сумму всегда считает сервер по цене тарифа из БД — клиент её не передаёт.
     price = calculate_price(tariff.price, get_discount_percent(data.promo_code))
+    # PaymentCreate гарантирует: срок задан тогда и только тогда, когда method == installment.
     schedule = None
-    if data.method is PaymentMethod.INSTALLMENT:
-        assert data.installment_months is not None  # гарантирует PaymentCreate
+    if data.installment_months is not None:
         schedule = split_into_installments(price.amount, data.installment_months)
 
     payment = Payment(

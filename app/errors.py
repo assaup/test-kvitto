@@ -12,5 +12,8 @@ class ApiError(Exception):
 
 
 async def api_error_handler(_request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, ApiError)
+    # Starlette типизирует обработчик через Exception; явная проверка вместо assert,
+    # который отключается при запуске python -O.
+    if not isinstance(exc, ApiError):
+        raise exc
     return JSONResponse(status_code=exc.status_code, content={"error": exc.error})
