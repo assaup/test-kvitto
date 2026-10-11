@@ -90,17 +90,14 @@ def test_get_payment_returns_created_payment(client: TestClient) -> None:
     assert response.json() == created
 
 
-def test_get_unknown_payment_returns_404(client: TestClient) -> None:
-    response = client.get(f"/payments/{uuid.uuid4()}")
+@pytest.mark.parametrize("payment_id", [str(uuid.uuid4()), "999999", "not-a-uuid", "9" * 100])
+def test_get_unknown_payment_returns_404(client: TestClient, payment_id: str) -> None:
+    client.post("/payments", json=payment_payload())  # в БД есть другой платёж
+
+    response = client.get(f"/payments/{payment_id}")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Payment not found"}
-
-
-def test_get_payment_with_malformed_id_returns_422(client: TestClient) -> None:
-    response = client.get("/payments/not-a-uuid")
-
-    assert response.status_code == 422
+    assert response.json() == {"error": "payment_not_found"}
 
 
 @pytest.mark.parametrize(

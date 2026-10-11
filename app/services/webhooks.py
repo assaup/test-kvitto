@@ -1,10 +1,9 @@
-import uuid
-
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.enums import PaymentStatus, statuses_allowed_to_become
 from app.models import Payment
+from app.services.payments import parse_payment_id
 
 
 class PaymentNotFoundError(Exception):
@@ -15,7 +14,7 @@ class InvalidTransitionError(Exception):
     pass
 
 
-def change_status(session: Session, payment_id: uuid.UUID, new_status: PaymentStatus) -> None:
+def change_status(session: Session, raw_payment_id: str | int, new_status: PaymentStatus) -> None:
     """Меняет статус платежа, если переход разрешён.
 
     Проверка и запись — один UPDATE с условием на текущий статус (compare-and-set).
@@ -23,6 +22,10 @@ def change_status(session: Session, payment_id: uuid.UUID, new_status: PaymentSt
     вебхука (succeeded и failed) оба прочитали бы pending и оба записали бы свой статус.
     Здесь БД выполняет UPDATE атомарно, и выиграет ровно один из них.
     """
+    payment_id = parse_payment_id(raw_payment_id)
+    if payment_id is None:
+        raise PaymentNotFoundError(raw_payment_id)
+
     result = session.execute(
         update(Payment)
         .where(

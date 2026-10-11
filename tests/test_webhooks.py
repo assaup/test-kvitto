@@ -26,7 +26,7 @@ PATH_TO_STATUS = {
 }
 
 
-def send_webhook(client: TestClient, payment_id: str, status: str) -> Response:
+def send_webhook(client: TestClient, payment_id: str | int, status: str) -> Response:
     return client.post("/webhooks/bank", json={"payment_id": payment_id, "status": status})
 
 
@@ -74,17 +74,27 @@ def test_forbidden_transition_returns_409_and_keeps_status(
     assert client.get(f"/payments/{payment_id}").json() == before  # платёж не изменился
 
 
-def test_webhook_for_unknown_payment_returns_404(client: TestClient) -> None:
-    response = send_webhook(client, str(uuid.uuid4()), "succeeded")
+@pytest.mark.parametrize("payment_id", [str(uuid.uuid4()), "999999", 999999, "not-a-uuid", 2**63])
+def test_webhook_for_unknown_payment_returns_404_and_changes_nothing(
+    client: TestClient, create_payment_in: Callable[[str], str], payment_id: str | int
+) -> None:
+    existing_id = create_payment_in("pending")
+
+    response = send_webhook(client, payment_id, "succeeded")
 
     assert response.status_code == 404
+    assert response.json() == {"error": "payment_not_found"}
+    assert client.get(f"/payments/{existing_id}").json()["status"] == "pending"
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        {"payment_id": "not-a-uuid", "status": "succeeded"},
         {"status": "succeeded"},
+        {"payment_id": None, "status": "succeeded"},
+        {"payment_id": True, "status": "succeeded"},  # не превращается в 1
+        {"payment_id": 1.5, "status": "succeeded"},
+        {"payment_id": {"id": "PAYMENT_ID"}, "status": "succeeded"},
         {"payment_id": "PAYMENT_ID", "status": "paid"},
         {"payment_id": "PAYMENT_ID"},
     ],

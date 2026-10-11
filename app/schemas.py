@@ -3,7 +3,14 @@ from datetime import datetime
 from typing import Literal, Self
 
 from email_validator import EmailNotValidError, validate_email
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from app.enums import PaymentMethod, PaymentStatus
 from app.money import get_discount_percent
@@ -76,7 +83,9 @@ class PaymentCreate(BaseModel):
 
 class BankWebhook(BaseModel):
     # Лишние поля не запрещаем: банк может присылать дополнительные данные.
-    payment_id: uuid.UUID
+    # payment_id — строка или целое: не-UUID значит «платежа нет» (404), а не 422.
+    # StrictInt — чтобы true не превратился в 1; null, 1.5 и объекты — по-прежнему 422.
+    payment_id: str | StrictInt
     status: PaymentStatus
 
 

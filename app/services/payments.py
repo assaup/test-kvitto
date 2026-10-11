@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +23,22 @@ def request_hash(data: PaymentCreate) -> str:
     """Хэш уже провалидированного тела: "kvitto10" и "KVITTO10" дают одинаковый хэш."""
     canonical = json.dumps(data.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def parse_payment_id(raw_id: str | int) -> uuid.UUID | None:
+    """id платежа — UUID. Любое другое значение ("999999", 999999) — это id несуществующего
+    платежа (404), а не ошибка формата (422): клиент не обязан знать, как устроены наши id."""
+    try:
+        return uuid.UUID(str(raw_id))
+    except ValueError:
+        return None
+
+
+def get_payment(session: Session, raw_id: str | int) -> Payment | None:
+    payment_id = parse_payment_id(raw_id)
+    if payment_id is None:
+        return None
+    return session.get(Payment, payment_id)
 
 
 def find_by_idempotency_key(session: Session, key: str) -> Payment | None:

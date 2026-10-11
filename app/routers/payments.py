@@ -1,12 +1,10 @@
-import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from fastapi import APIRouter, Header, Response, status
 from fastapi.exceptions import RequestValidationError
 
 from app.db import SessionDep
 from app.errors import ApiError
-from app.models import Payment
 from app.schemas import PaymentCreate, PaymentOut
 from app.services import payments as payment_service
 
@@ -53,9 +51,13 @@ def create_payment(
     return PaymentOut.model_validate(payment)
 
 
-@router.get("/payments/{payment_id}")
-def get_payment(payment_id: uuid.UUID, session: SessionDep) -> PaymentOut:
-    payment = session.get(Payment, payment_id)
+@router.get(
+    "/payments/{payment_id}",
+    responses={404: {"description": 'Платёж не найден: {"error": "payment_not_found"}'}},
+)
+def get_payment(payment_id: str, session: SessionDep) -> PaymentOut:
+    # payment_id — строка, а не uuid.UUID: на "999999" отвечаем 404 «нет такого», а не 422.
+    payment = payment_service.get_payment(session, payment_id)
     if payment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+        raise ApiError(status.HTTP_404_NOT_FOUND, "payment_not_found")
     return PaymentOut.model_validate(payment)
