@@ -1,0 +1,46 @@
+# Локальный запуск: docker compose up --build
+# Логины и пароли здесь — только для локальной разработки.
+
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+psycopg://kvitto:kvitto@db:5432/kvitto
+  WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-webhook-secret}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kvitto
+      POSTGRES_PASSWORD: kvitto
+      POSTGRES_DB: kvitto
+    ports:
+      - "5433:5432" # 5433 на хосте — чтобы не конфликтовать с локальным Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kvitto -d kvitto"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Миграции — разовый шаг до старта приложения, а не часть его запуска:
+  # при нескольких репликах app они не будут выполняться одновременно.
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    environment: *app-environment
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

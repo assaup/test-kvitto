@@ -3,7 +3,8 @@
 Сервис приёма оплаты курса онлайн-школы через Квитто: тарифы, создание платежа (карта, СБП, рассрочка),
 промокод, идемпотентность по `Idempotency-Key` и вебхук банка со сменой статусов.
 
-**Стек:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2, SQLite, pytest + httpx, ruff.
+**Стек:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, SQLite или PostgreSQL,
+pytest + httpx, ruff, Docker Compose.
 
 ## Запуск
 
@@ -25,6 +26,20 @@ uvicorn app.main:app --reload
 - Настройки — переменные окружения или `.env`: `DATABASE_URL` и `WEBHOOK_SECRET` (секрет подписи
   вебхуков). Без `WEBHOOK_SECRET` сервис работает, но все вебхуки отклоняются с 401.
 
+## Запуск в Docker (PostgreSQL)
+
+```bash
+git clone <repo-url> kvitto-payments && cd kvitto-payments
+docker compose up --build
+```
+
+- Поднимаются три сервиса: `db` (PostgreSQL 16), `migrate` (разово выполняет `alembic upgrade head`)
+  и `app` (uvicorn на http://127.0.0.1:8000). `app` стартует только после успешных миграций.
+- PostgreSQL доступен с хоста на порту **5433** (не 5432 — чтобы не конфликтовать с локальным).
+- Секрет вебхуков — `WEBHOOK_SECRET` из окружения или `.env`, по умолчанию `dev-webhook-secret`,
+  поэтому пример с подписью ниже работает без изменений.
+- Остановить: `docker compose down`; удалить и данные БД: `docker compose down -v`.
+
 ## Тесты и линтер
 
 ```bash
@@ -33,8 +48,18 @@ ruff check .
 ruff format --check .
 ```
 
-Каждый тест получает свою копию SQLite-базы, созданной миграциями (миграции применяются один раз
-за прогон), и отдельный тест сверяет миграции с моделями. Тесты проверяют не только код ответа, но и
+Те же тесты на PostgreSQL — в отдельной базе `kvitto_test`, данные приложения не затрагиваются:
+
+```bash
+docker compose up -d db
+TEST_DATABASE_URL=postgresql+psycopg://kvitto:kvitto@localhost:5433/kvitto_test pytest
+```
+
+В PowerShell: `$env:TEST_DATABASE_URL="postgresql+psycopg://kvitto:kvitto@localhost:5433/kvitto_test"; pytest`.
+
+На SQLite каждый тест получает свою копию базы, созданной миграциями (миграции применяются один
+раз за прогон); на PostgreSQL база мигрируется один раз, а таблицы очищаются перед каждым тестом.
+Отдельный тест сверяет миграции с моделями на той БД, где идут тесты. Тесты проверяют не только код ответа, но и
 результат: суммы и график против значений из задания, количество платежей в БД, неизменность
 платежа после 409 и 404.
 
@@ -213,6 +238,9 @@ app/
   routers/             HTTP-слой: tariffs, payments, webhooks
   services/            бизнес-логика: создание и поиск платежа, смена статуса
 migrations/            миграции Alembic (alembic.ini — в корне)
+docker/                init-скрипт PostgreSQL: создаёт базу kvitto_test для тестов
+Dockerfile             образ приложения (python:3.11-slim, не root)
+docker-compose.yml     db + migrate + app
 tests/                 pytest: деньги, платежи, идемпотентность, вебхуки, миграции
 ```
 

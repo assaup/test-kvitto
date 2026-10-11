@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, inspect
 
 from app.db import Base
 from app.main import create_app
-from tests.conftest import alembic_config, make_settings, run_migrations
+from tests.conftest import alembic_config, make_settings
 
 
 def table_names(database_url: str) -> set[str]:
@@ -20,11 +20,11 @@ def table_names(database_url: str) -> set[str]:
         engine.dispose()
 
 
-def test_migrations_match_models(tmp_path: Path) -> None:
-    """Поменяли модель и забыли миграцию — тест упадёт и покажет расхождение."""
-    database_url = f"sqlite:///{tmp_path / 'm.db'}"
-    run_migrations(database_url)
+def test_migrations_match_models(database_url: str) -> None:
+    """Поменяли модель и забыли миграцию — тест упадёт и покажет расхождение.
 
+    database_url уже создан миграциями — на SQLite или, с TEST_DATABASE_URL, на PostgreSQL.
+    """
     engine = create_engine(database_url)
     with engine.connect() as connection:
         diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
