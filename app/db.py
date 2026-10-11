@@ -1,13 +1,39 @@
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import DateTime, Dialect, Engine, TypeDecorator, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """Дата-время всегда в UTC и всегда с часовым поясом.
+
+    SQLite не хранит часовой пояс и возвращает «наивный» datetime — добавляем UTC обратно,
+    чтобы в API created_at всегда отдавался однозначно (с +00:00).
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError("Naive datetime is not allowed, use timezone-aware UTC")
+        return value.astimezone(UTC)
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 def make_engine(database_url: str) -> Engine:

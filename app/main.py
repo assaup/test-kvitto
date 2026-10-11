@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from app import models  # noqa: F401  — регистрирует таблицы в Base.metadata
 from app.config import settings
 from app.db import Base, make_engine
-from app.routers import tariffs
+from app.routers import payments, tariffs
 from app.seed import seed_tariffs
 
 
@@ -27,6 +27,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app = FastAPI(title="Kvitto Payments API", lifespan=lifespan)
     app.state.session_factory = session_factory
     app.include_router(tariffs.router)
+    app.include_router(payments.router)
     return app
 
 
