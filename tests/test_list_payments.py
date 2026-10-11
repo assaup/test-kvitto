@@ -72,6 +72,16 @@ def test_filters_are_combined(client: TestClient, payments: dict[str, dict[str, 
     assert ids(response.json()) == {payments["anna_sbp"]["id"]}
 
 
+@pytest.mark.parametrize("email", ["", "   "])
+def test_empty_email_filter_means_no_filter(
+    client: TestClient, payments: dict[str, dict[str, Any]], email: str
+) -> None:
+    response = client.get("/payments", params={"email": email})
+
+    assert response.status_code == 200
+    assert ids(response.json()) == {payment["id"] for payment in payments.values()}
+
+
 def test_no_matches_returns_empty_list(
     client: TestClient, payments: dict[str, dict[str, Any]]
 ) -> None:

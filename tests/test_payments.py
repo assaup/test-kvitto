@@ -91,8 +91,11 @@ def test_installment_schedule_sums_to_expected_amount(
     assert schedule == sorted(schedule, reverse=True)  # лишние копейки — в первых платежах
 
 
-def test_email_is_normalized_to_lowercase(client: TestClient) -> None:
-    response = client.post("/payments", json=payment_payload(email="Student@Example.COM"))
+@pytest.mark.parametrize(
+    "email", ["Student@Example.COM", "  student@example.com  ", "\tStudent@example.com "]
+)
+def test_email_is_trimmed_and_lowercased(client: TestClient, email: str) -> None:
+    response = client.post("/payments", json=payment_payload(email=email))
 
     assert response.status_code == 201
     assert response.json()["email"] == "student@example.com"

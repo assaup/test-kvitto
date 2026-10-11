@@ -49,8 +49,9 @@ class PaymentCreate(BaseModel):
     def validate_email_address(cls, value: str) -> str:
         # Не EmailStr: он молча превращает "Иван <ivan@example.com>" в "ivan@example.com".
         # validate_email по умолчанию не принимает имя перед адресом — это ошибка 422.
+        # Пробелы по краям обрезаем, как у промокода и фильтра списка.
         try:
-            email = validate_email(value, check_deliverability=False).normalized
+            email = validate_email(value.strip(), check_deliverability=False).normalized
         except EmailNotValidError as error:
             raise ValueError(str(error)) from None
         # Целиком в нижнем регистре: Student@example.com и student@example.com — один получатель,

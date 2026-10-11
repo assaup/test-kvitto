@@ -51,9 +51,11 @@ def list_payments(
     offset: int,
 ) -> list[Payment]:
     query = select(Payment)
-    if email is not None:
-        # Email хранится в нижнем регистре (см. PaymentCreate) — ищем так же.
-        query = query.where(Payment.email == email.strip().lower())
+    # Email хранится обрезанным и в нижнем регистре (см. PaymentCreate) — ищем так же.
+    # Пустой ?email= — «без фильтра», как пустой промокод — «без промокода».
+    normalized_email = (email or "").strip().lower()
+    if normalized_email:
+        query = query.where(Payment.email == normalized_email)
     if status is not None:
         query = query.where(Payment.status == status)
     # Новые сначала; id — второй ключ сортировки, чтобы при одинаковом created_at
