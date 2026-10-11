@@ -8,7 +8,7 @@ from app import models  # noqa: F401  — регистрирует таблиц�
 from app.config import settings
 from app.db import Base, make_engine
 from app.errors import ApiError, api_error_handler
-from app.routers import payments, tariffs
+from app.routers import payments, tariffs, webhooks
 from app.seed import seed_tariffs
 
 
@@ -30,6 +30,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.add_exception_handler(ApiError, api_error_handler)
     app.include_router(tariffs.router)
     app.include_router(payments.router)
+    app.include_router(webhooks.router)
     return app
 
 

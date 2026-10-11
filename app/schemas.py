@@ -45,6 +45,16 @@ class PaymentCreate(BaseModel):
         return self
 
 
+class BankWebhook(BaseModel):
+    # Лишние поля не запрещаем: банк может присылать дополнительные данные.
+    payment_id: uuid.UUID
+    status: PaymentStatus
+
+
+class WebhookAck(BaseModel):
+    result: Literal["ok"] = "ok"
+
+
 class PaymentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
