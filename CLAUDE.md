@@ -6,7 +6,9 @@
 
 - Миграции: `alembic upgrade head`; новая — `alembic revision --autogenerate -m "..."`
 - Запуск: `uvicorn app.main:app --reload`
-- Тесты: `pytest`
+- БД: только PostgreSQL — `docker compose up -d db` (порт 5433 на хосте)
+- Тесты: `pytest` (база `kvitto_test`; тесты очищают таблицы — только база с суффиксом `_test`)
+- CI: `.github/workflows/ci.yml` — ruff и pytest с PostgreSQL на каждый push
 - Линтер и формат: `ruff check .` и `ruff format .`
 
 Перед тем как считать задачу готовой, `pytest` и `ruff check .` должны проходить.

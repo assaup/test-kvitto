@@ -24,13 +24,11 @@ def get_database_url() -> str:
 
 def run_migrations_offline() -> None:
     """Генерация SQL без подключения к БД: alembic upgrade head --sql."""
-    url = get_database_url()
     context.configure(
-        url=url,
+        url=get_database_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=url.startswith("sqlite"),
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -39,12 +37,7 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     engine = create_engine(get_database_url(), poolclass=pool.NullPool)
     with engine.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            # SQLite почти не умеет ALTER TABLE: batch-режим пересоздаёт таблицу целиком.
-            render_as_batch=connection.dialect.name == "sqlite",
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
     engine.dispose()

@@ -3,21 +3,13 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import (
-    DateTime,
-    Dialect,
-    Engine,
-    MetaData,
-    TypeDecorator,
-    create_engine,
-    event,
-)
+from sqlalchemy import DateTime, Dialect, Engine, MetaData, TypeDecorator, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
 
 class Base(DeclarativeBase):
-    # Предсказуемые имена индексов и ограничений: Alembic сможет удалить или изменить их
-    # в будущих миграциях (на SQLite через batch-режим без имени ограничение не найти).
+    # Предсказуемые имена индексов и ограничений: Alembic сможет найти, удалить или изменить
+    # их в будущих миграциях.
     metadata = MetaData(
         naming_convention={
             "ix": "ix_%(column_0_label)s",
@@ -30,10 +22,10 @@ class Base(DeclarativeBase):
 
 
 class UTCDateTime(TypeDecorator[datetime]):
-    """Дата-время всегда в UTC и всегда с часовым поясом.
+    """Дата-время всегда в UTC и всегда с часовым поясом (в БД — timestamptz).
 
-    SQLite не хранит часовой пояс и возвращает «наивный» datetime — добавляем UTC обратно,
-    чтобы в API created_at всегда отдавался однозначно (с +00:00).
+    PostgreSQL отдаёт время в часовом поясе сессии: при TimeZone=Europe/Moscow created_at
+    пришёл бы с +03:00. Приводим к UTC, чтобы API отдавал время однозначно и одинаково.
     """
 
     impl = DateTime(timezone=True)
@@ -47,29 +39,13 @@ class UTCDateTime(TypeDecorator[datetime]):
         return value.astimezone(UTC)
 
     def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
-        if value is None:
-            return None
-        if value.tzinfo is None:
-            return value.replace(tzinfo=UTC)
-        return value.astimezone(UTC)
+        return None if value is None else value.astimezone(UTC)
 
 
 def make_engine(database_url: str) -> Engine:
-    is_sqlite = database_url.startswith("sqlite")
-    # FastAPI выполняет sync-эндпоинты в пуле потоков, поэтому одно SQLite-соединение
-    # может использоваться из разных потоков. timeout — сколько ждать снятия блокировки БД.
-    connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite else {}
-    engine = create_engine(database_url, connect_args=connect_args)
-
-    if is_sqlite:
-        # SQLite по умолчанию не проверяет внешние ключи — включаем явно.
-        @event.listens_for(engine, "connect")
-        def _enable_foreign_keys(dbapi_connection, _connection_record) -> None:
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-    return engine
+    # pool_pre_ping: проверить соединение перед выдачей из пула — после перезапуска
+    # PostgreSQL первый запрос не упадёт на «мёртвом» соединении.
+    return create_engine(database_url, pool_pre_ping=True)
 
 
 def get_session(request: Request) -> Iterator[Session]:

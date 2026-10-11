@@ -8,7 +8,7 @@ Create Date: 2026-10-11 12:00:19.146790
 - created_at: sa.DateTime(timezone=True) вместо app.db.UTCDateTime — автогенерация вставила
   тип приложения без импорта, а в схеме БД это обычный DATETIME (UTCDateTime — обёртка в Python);
 - убраны дублирующие CHECK для enum: sa.Enum(create_constraint=True) создаёт их сам;
-- индексы — обычный op.create_index, batch-режим для только что созданной таблицы не нужен.
+- индексы — обычный op.create_index вместо batch_alter_table.
 """
 
 from collections.abc import Sequence

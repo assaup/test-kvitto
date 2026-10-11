@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -10,7 +9,8 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from httpx import Response
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, func, make_url, select, text
+from sqlalchemy.exc import OperationalError
 
 from app.config import Settings
 from app.main import create_app
@@ -19,9 +19,10 @@ from app.signatures import sign
 
 WEBHOOK_SECRET = "test-webhook-secret"
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
-# Прогон на PostgreSQL: TEST_DATABASE_URL=postgresql+psycopg://...  (см. README).
-# Без переменной тесты идут на SQLite.
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+# Отдельная база для тестов (создаёт docker/postgres-init.sql): тесты очищают таблицы.
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql+psycopg://kvitto:kvitto@localhost:5433/kvitto_test"
+)
 
 
 def alembic_config(database_url: str) -> Config:
@@ -30,22 +31,25 @@ def alembic_config(database_url: str) -> Config:
     return config
 
 
-def run_migrations(database_url: str) -> None:
-    command.upgrade(alembic_config(database_url), "head")
-
-
 @pytest.fixture(scope="session")
-def migrated_db_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Схема из миграций — та же, что в продакшене. Создаётся один раз на все тесты."""
-    path = tmp_path_factory.mktemp("template") / "template.db"
-    run_migrations(f"sqlite:///{path}")
-    return path
+def migrated_database() -> str:
+    """Тестовая база: схема пересоздаётся миграциями один раз за прогон."""
+    url = make_url(TEST_DATABASE_URL)
+    safe_url = url.render_as_string(hide_password=True)
+    if not (url.database or "").endswith("_test"):
+        # Защита от `TRUNCATE` рабочей базы по ошибке в переменной окружения.
+        pytest.exit(f"Тесты очищают таблицы: нужна база с суффиксом _test, а не {safe_url}", 2)
 
+    # connect_timeout: без него на Windows ответ «БД недоступна» приходил через ~2 минуты.
+    engine = create_engine(TEST_DATABASE_URL, connect_args={"connect_timeout": 3})
+    try:
+        with engine.connect():
+            pass
+    except OperationalError:
+        pytest.exit(f"PostgreSQL недоступен ({safe_url}): запустите docker compose up -d db", 2)
+    finally:
+        engine.dispose()
 
-@pytest.fixture(scope="session")
-def migrated_postgres() -> str:
-    """Тестовая база PostgreSQL: схема пересоздаётся миграциями один раз за прогон."""
-    assert TEST_DATABASE_URL is not None
     config = alembic_config(TEST_DATABASE_URL)
     command.downgrade(config, "base")  # чистый старт, даже если прошлый прогон оборвался
     command.upgrade(config, "head")
@@ -53,24 +57,13 @@ def migrated_postgres() -> str:
 
 
 @pytest.fixture
-def database_url(request: pytest.FixtureRequest, tmp_path: Path) -> str:
-    """БД для одного теста.
-
-    По умолчанию — своя копия мигрированной SQLite (файловой, а не :memory:, — чтобы потоки
-    в конкурентных тестах видели одну БД). С TEST_DATABASE_URL — общая база PostgreSQL,
-    таблицы которой очищаются перед каждым тестом.
-    """
-    if TEST_DATABASE_URL is not None:
-        url = request.getfixturevalue("migrated_postgres")
-        engine = create_engine(url)
-        with engine.begin() as connection:
-            connection.execute(text("TRUNCATE payments, tariffs RESTART IDENTITY CASCADE"))
-        engine.dispose()
-        return url
-
-    path = tmp_path / "test.db"
-    shutil.copy(request.getfixturevalue("migrated_db_template"), path)
-    return f"sqlite:///{path}"
+def database_url(migrated_database: str) -> str:
+    """База для одного теста: схема из миграций, таблицы очищены перед тестом."""
+    engine = create_engine(migrated_database)
+    with engine.begin() as connection:
+        connection.execute(text("TRUNCATE payments, tariffs RESTART IDENTITY CASCADE"))
+    engine.dispose()
+    return migrated_database
 
 
 def make_settings(database_url: str, webhook_secret: str | None = WEBHOOK_SECRET) -> Settings:

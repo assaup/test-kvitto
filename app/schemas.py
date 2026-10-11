@@ -15,8 +15,8 @@ from pydantic import (
 from app.enums import PaymentMethod, PaymentStatus
 from app.money import get_discount_percent
 
-# Максимум INTEGER в PostgreSQL. Без верхней границы огромный tariff_id ронял запрос с 500
-# (OverflowError в SQLite, DataError в PostgreSQL) вместо 422.
+# Максимум INTEGER в PostgreSQL. Без верхней границы огромный tariff_id ронял запрос
+# с 500 (ошибка БД при выходе числа за диапазон INTEGER) вместо 422.
 DB_INT_MAX = 2_147_483_647
 INSTALLMENT_MONTHS = (3, 6, 12)
 
