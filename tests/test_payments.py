@@ -50,12 +50,26 @@ def test_installment_example_from_spec(client: TestClient) -> None:
     assert body["schedule"] == [663_334, 663_333, 663_333]
 
 
+# Ожидаемые суммы посчитаны вручную по заданию (цена тарифа, KVITTO10 = −10%),
+# а не взяты из кода — иначе тест сверял бы ответ сам с собой.
+EXPECTED_PRICES = {
+    # (tariff_id, promo_code): (amount, discount)
+    (1, None): (990_000, 0),
+    (1, "kvitto10"): (891_000, 99_000),
+    (2, None): (1_990_000, 0),
+    (2, "kvitto10"): (1_791_000, 199_000),
+    (3, None): (2_990_000, 0),
+    (3, "kvitto10"): (2_691_000, 299_000),
+}
+
+
 @pytest.mark.parametrize("months", [3, 6, 12])
-@pytest.mark.parametrize("promo_code", [None, "kvitto10"])
-@pytest.mark.parametrize("tariff_id", [1, 2, 3])
-def test_installment_schedule_sums_to_amount(
+@pytest.mark.parametrize(("tariff_id", "promo_code"), list(EXPECTED_PRICES))
+def test_installment_schedule_sums_to_expected_amount(
     client: TestClient, tariff_id: int, promo_code: str | None, months: int
 ) -> None:
+    expected_amount, expected_discount = EXPECTED_PRICES[(tariff_id, promo_code)]
+
     response = client.post(
         "/payments",
         json=payment_payload(
@@ -68,8 +82,13 @@ def test_installment_schedule_sums_to_amount(
 
     assert response.status_code == 201
     body = response.json()
-    assert len(body["schedule"]) == months
-    assert sum(body["schedule"]) == body["amount"]
+    assert body["amount"] == expected_amount
+    assert body["discount"] == expected_discount
+    schedule = body["schedule"]
+    assert len(schedule) == months
+    assert sum(schedule) == expected_amount
+    assert max(schedule) - min(schedule) <= 1
+    assert schedule == sorted(schedule, reverse=True)  # лишние копейки — в первых платежах
 
 
 def test_email_is_normalized_to_lowercase(client: TestClient) -> None:
@@ -103,8 +122,6 @@ def test_get_unknown_payment_returns_404(client: TestClient, payment_id: str) ->
 @pytest.mark.parametrize(
     ("overrides", "error_field"),
     [
-        ({"method": "installment"}, None),  # рассрочка без installment_months
-        ({"method": "card", "installment_months": 3}, None),  # срок без рассрочки
         ({"method": "installment", "installment_months": 4}, "installment_months"),
         ({"method": "installment", "installment_months": "3"}, "installment_months"),
         ({"method": "installment", "installment_months": 3.0}, "installment_months"),
@@ -128,14 +145,37 @@ def test_invalid_payment_returns_422_and_creates_nothing(
     client: TestClient,
     count_payments: Callable[[], int],
     overrides: dict[str, Any],
-    error_field: str | None,
+    error_field: str,
 ) -> None:
     response = client.post("/payments", json=payment_payload(**overrides))
 
     assert response.status_code == 422
     errors = response.json()["detail"]  # стандартный формат FastAPI
-    if error_field is not None:
-        assert any(error["loc"][:2] == ["body", error_field] for error in errors), errors
+    assert any(error["loc"][:2] == ["body", error_field] for error in errors), errors
+    assert count_payments() == 0
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"method": "installment"}, "installment_months is required for installment method"),
+        ({"method": "installment", "installment_months": None}, "is required for installment"),
+        ({"method": "card", "installment_months": 3}, "allowed only for installment method"),
+        ({"method": "sbp", "installment_months": 12}, "allowed only for installment method"),
+    ],
+)
+def test_installment_months_must_match_method(
+    client: TestClient,
+    count_payments: Callable[[], int],
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    response = client.post("/payments", json=payment_payload(**overrides))
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]
+    # Ошибка уровня всей модели (зависит от двух полей), поэтому проверяем причину по тексту.
+    assert any(message in error["msg"] for error in errors), errors
     assert count_payments() == 0
 
 

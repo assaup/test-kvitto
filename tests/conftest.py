@@ -30,7 +30,10 @@ def count_payments(client: TestClient) -> Callable[[], int]:
 
 
 def payment_payload(**overrides: Any) -> dict[str, Any]:
-    """Валидное тело POST /payments; поля можно переопределить или удалить (значение None)."""
+    """Валидное тело POST /payments с переопределёнными полями.
+
+    Значение None отправляется как JSON null, а не удаляет поле — для удаления используйте del.
+    """
     payload: dict[str, Any] = {"tariff_id": 2, "email": "student@example.com", "method": "card"}
     payload.update(overrides)
     return payload
