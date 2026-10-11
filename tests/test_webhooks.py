@@ -1,3 +1,4 @@
+import json
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -9,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from tests.conftest import payment_payload
+from tests.conftest import payment_payload, signed_headers
 
 STATUSES = ["pending", "succeeded", "failed", "refunded"]
 
@@ -27,7 +28,8 @@ PATH_TO_STATUS = {
 
 
 def send_webhook(client: TestClient, payment_id: str | int, status: str) -> Response:
-    return client.post("/webhooks/bank", json={"payment_id": payment_id, "status": status})
+    body = json.dumps({"payment_id": payment_id, "status": status}).encode()
+    return client.post("/webhooks/bank", content=body, headers=signed_headers(body))
 
 
 @pytest.fixture
@@ -106,7 +108,9 @@ def test_invalid_webhook_body_returns_422_and_keeps_status(
     if body.get("payment_id") == "PAYMENT_ID":
         body = {**body, "payment_id": payment_id}
 
-    response = client.post("/webhooks/bank", json=body)
+    raw = json.dumps(body).encode()  # подпись верная — проверяем именно валидацию тела
+
+    response = client.post("/webhooks/bank", content=raw, headers=signed_headers(raw))
 
     assert response.status_code == 422
     assert client.get(f"/payments/{payment_id}").json()["status"] == "pending"

@@ -14,12 +14,14 @@ git clone <repo-url> kvitto-payments && cd kvitto-payments
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
+cp .env.example .env               # Windows: copy .env.example .env
 uvicorn app.main:app --reload
 ```
 
 - API: http://127.0.0.1:8000, Swagger UI: http://127.0.0.1:8000/docs
 - База SQLite (`kvitto.db`) и тарифы создаются автоматически при старте.
-- Другую БД можно задать переменной `DATABASE_URL` (пример — `.env.example`).
+- Настройки — переменные окружения или `.env`: `DATABASE_URL` и `WEBHOOK_SECRET` (секрет подписи
+  вебхуков). Без `WEBHOOK_SECRET` сервис работает, но все вебхуки отклоняются с 401.
 
 ## Тесты и линтер
 
@@ -40,7 +42,7 @@ ruff format --check .
 | `GET /tariffs` | 200 — `[{id, title, price}]` |
 | `POST /payments` | 201 — платёж создан; 200 — повтор с тем же `Idempotency-Key`; 409 `{"error": "idempotency_key_reused"}` — ключ уже использован с другим телом; 422 — ошибка валидации |
 | `GET /payments/{id}` | 200 — платёж; 404 `{"error": "payment_not_found"}` |
-| `POST /webhooks/bank` | 200 `{"result": "ok"}`; 404 `{"error": "payment_not_found"}`; 409 `{"error": "invalid_transition"}` |
+| `POST /webhooks/bank` | 200 `{"result": "ok"}`; 401 `{"error": "invalid_signature"}`; 404 `{"error": "payment_not_found"}`; 409 `{"error": "invalid_transition"}` |
 
 Все суммы — целые копейки: `19 900 ₽ → 1990000`.
 
@@ -87,13 +89,18 @@ curl -X POST http://127.0.0.1:8000/payments \
 curl http://127.0.0.1:8000/payments/f51c3b3f-4c17-44e3-ac63-c06c425ea3d0
 ```
 
-Вебхук банка: `pending → succeeded` — 200 `{"result":"ok"}`; повторно отправить `failed` для этого
-платежа — 409 `{"error":"invalid_transition"}`, статус не изменится:
+Вебхук банка. Заголовок `X-Signature` — HMAC-SHA256 от тела запроса с секретом `WEBHOOK_SECRET`
+в hex; подписываются ровно те байты, что уходят в `-d`. `pending → succeeded` — 200
+`{"result":"ok"}`; повторно отправить `failed` — 409 `{"error":"invalid_transition"}`, статус не
+изменится; без подписи или с неверной — 401 `{"error":"invalid_signature"}`:
 
 ```bash
+BODY='{"payment_id": "f51c3b3f-4c17-44e3-ac63-c06c425ea3d0", "status": "succeeded"}'
+SIGNATURE=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "dev-webhook-secret" | sed 's/^.* //')
 curl -X POST http://127.0.0.1:8000/webhooks/bank \
   -H "Content-Type: application/json" \
-  -d '{"payment_id": "f51c3b3f-4c17-44e3-ac63-c06c425ea3d0", "status": "succeeded"}'
+  -H "X-Signature: $SIGNATURE" \
+  -d "$BODY"
 ```
 
 ## Решения и допущения
@@ -145,6 +152,13 @@ email в другом регистре — это тот же запрос, а �
 одновременно придут `succeeded` и `failed`, применится ровно один, второй получит 409.
 Повтор того же статуса (`succeeded → succeeded`) — тоже 409, как требует задание.
 
+**Подпись вебхука.** `X-Signature` = HMAC-SHA256 от сырых байтов тела с `WEBHOOK_SECRET`, в hex
+(регистр не важен). Сравнение — `hmac.compare_digest`: время не зависит от того, где расхождение,
+поэтому подпись нельзя подбирать посимвольно по времени ответа. Подпись проверяется до валидации
+тела: неподписанный запрос получает 401, а не подсказку 422 о неверных полях. Значения секрета по
+умолчанию в коде нет — известный всем секрет хуже отсутствующего; если он не задан, все вебхуки
+отклоняются (fail closed), а при старте пишется предупреждение.
+
 **Время.** `created_at` хранится и отдаётся в UTC с часовым поясом.
 
 ## Что бы доработал в продакшене
@@ -152,7 +166,8 @@ email в другом регистре — это тот же запрос, а �
 - Повторный вебхук с тем же статусом отвечать 200 без изменений: банки повторяют доставку.
 - Срок жизни `Idempotency-Key` (например, 24 часа) и привязка ключа к магазину.
 - Журнал изменений статусов (кто, когда, из какого в какой) для разбора спорных платежей.
-- Проверка подписи вебхука — без неё статус может сменить кто угодно.
+- Метка времени в подписи вебхука: сейчас перехваченный подписанный запрос можно отправить повторно.
+  Вреда от этого немного — повтор того же перехода получит 409, — но защита от replay нужна.
 
 ## Структура
 
@@ -160,6 +175,7 @@ email в другом регистре — это тот же запрос, а �
 app/
   main.py              фабрика приложения, lifespan: создание таблиц и тарифов
   config.py            настройки из окружения / .env
+  signatures.py        HMAC-подпись вебхуков
   db.py                engine, сессия на запрос, тип UTCDateTime
   models.py            Tariff, Payment
   schemas.py           Pydantic-схемы запросов и ответов, валидация

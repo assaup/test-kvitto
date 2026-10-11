@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -5,20 +6,25 @@ from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
 from app import models  # noqa: F401  — регистрирует таблицы в Base.metadata
-from app.config import settings
+from app.config import Settings, settings
 from app.db import Base, make_engine
 from app.errors import ApiError, api_error_handler
 from app.routers import payments, tariffs, webhooks
 from app.seed import seed_tariffs
 
+logger = logging.getLogger(__name__)
 
-def create_app(database_url: str | None = None) -> FastAPI:
-    """Фабрика приложения. В тестах вызывается с отдельной БД для каждого теста."""
-    engine = make_engine(database_url or settings.database_url)
+
+def create_app(app_settings: Settings | None = None) -> FastAPI:
+    """Фабрика приложения. Тесты передают свои настройки: отдельную БД и секрет вебхуков."""
+    app_settings = app_settings or settings
+    engine = make_engine(app_settings.database_url)
     session_factory = sessionmaker(engine, expire_on_commit=False)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+        if not app_settings.webhook_secret:
+            logger.warning("WEBHOOK_SECRET не задан: все вебхуки банка будут отклоняться с 401")
         Base.metadata.create_all(engine)
         with session_factory() as session:
             seed_tariffs(session)
@@ -26,6 +32,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         engine.dispose()
 
     app = FastAPI(title="Kvitto Payments API", lifespan=lifespan)
+    app.state.settings = app_settings
     app.state.session_factory = session_factory
     app.add_exception_handler(ApiError, api_error_handler)
     app.include_router(tariffs.router)

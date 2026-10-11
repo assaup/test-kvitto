@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from tests.conftest import make_settings
 
 EXPECTED_TARIFFS = [
     {"id": 1, "title": "basic", "price": 990_000},
@@ -22,10 +23,10 @@ def test_list_tariffs_returns_seeded_tariffs_in_kopecks(client: TestClient) -> N
 
 
 def test_tariffs_are_not_duplicated_on_restart(tmp_path: Path) -> None:
-    database_url = f"sqlite:///{tmp_path / 'restart.db'}"
+    settings = make_settings(tmp_path)
 
     for _ in range(2):  # два запуска приложения на одной и той же БД
-        with TestClient(create_app(database_url)) as client:
+        with TestClient(create_app(settings)) as client:
             response = client.get("/tariffs")
 
     assert response.json() == EXPECTED_TARIFFS
