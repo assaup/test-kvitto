@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +10,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from sqlalchemy import Engine, create_engine, text
 
 from tests.conftest import payment_payload, send_webhook, signed_headers
 
@@ -114,8 +116,11 @@ def test_invalid_webhook_body_returns_422_and_keeps_status(
 def test_concurrent_conflicting_webhooks_apply_exactly_one(
     client: TestClient, create_payment_in: Callable[[str], str]
 ) -> None:
-    """Банк одновременно шлёт succeeded и failed для одного pending-платежа:
-    применяется ровно один, остальные получают 409."""
+    """Нагрузочная проверка: 10 одновременных вебхуков — ни 500, ни двойного применения.
+
+    Гонку сам по себе этот тест не воспроизводит: на PostgreSQL запрос выполняется быстрее,
+    чем разброс между потоками TestClient. Атомарность проверяет детерминированный тест ниже.
+    """
     payment_id = create_payment_in("pending")
     targets = ["succeeded", "failed"] * 5
     start = Barrier(len(targets))
@@ -132,3 +137,57 @@ def test_concurrent_conflicting_webhooks_apply_exactly_one(
     assert len(winners) == 1
     assert all(response.status_code == 409 for response in losers)
     assert client.get(f"/payments/{payment_id}").json()["status"] == winners[0]
+
+
+def wait_for_blocked_updates(engine: Engine, expected: int, timeout: float = 10) -> None:
+    """Ждёт, пока expected запросов UPDATE payments встанут в очередь за блокировкой строки."""
+    query = text(
+        "SELECT count(*) FROM pg_stat_activity "
+        "WHERE datname = current_database() AND wait_event_type = 'Lock' "
+        "AND query ILIKE 'UPDATE payments%'"
+    )
+    deadline = time.monotonic() + timeout
+    # AUTOCOMMIT: внутри одной транзакции pg_stat_activity отдаёт один и тот же снимок.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as monitor:
+        while time.monotonic() < deadline:
+            if monitor.scalar(query) >= expected:
+                return
+            time.sleep(0.02)
+    raise AssertionError(f"За {timeout} с за блокировкой строки не встали {expected} UPDATE")
+
+
+def test_conflicting_webhooks_on_locked_row_apply_exactly_one(
+    client: TestClient, database_url: str, create_payment_in: Callable[[str], str]
+) -> None:
+    """Детерминированная гонка succeeded и failed для одного pending-платежа.
+
+    Отдельное соединение держит блокировку строки (SELECT ... FOR UPDATE). Оба вебхука доходят
+    до UPDATE и ждут; затем блокировка снимается. Атомарный UPDATE ... WHERE status IN (...)
+    после ожидания перепроверяет условие — второй вебхук получает 409. Вариант
+    «прочитать → проверить → записать» уже прочитал pending в обоих запросах, и оба получили бы 200.
+    """
+    payment_id = create_payment_in("pending")
+    engine = create_engine(database_url)
+    locker = engine.connect()
+    try:
+        locker.execute(
+            text("SELECT id FROM payments WHERE id = :id FOR UPDATE"),
+            {"id": uuid.UUID(payment_id)},
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {
+                target: pool.submit(send_webhook, client, payment_id, target)
+                for target in ("succeeded", "failed")
+            }
+            try:
+                wait_for_blocked_updates(engine, expected=2)
+            finally:
+                locker.rollback()  # снимаем блокировку — иначе потоки ждали бы вечно
+            responses = {target: future.result(timeout=30) for target, future in futures.items()}
+    finally:
+        locker.close()
+        engine.dispose()
+
+    assert sorted(response.status_code for response in responses.values()) == [200, 409]
+    winner = next(target for target, response in responses.items() if response.status_code == 200)
+    assert client.get(f"/payments/{payment_id}").json()["status"] == winner

@@ -143,9 +143,15 @@ def test_race_between_check_and_insert_returns_existing_payment(
 def test_concurrent_requests_with_same_key_create_one_payment(
     client: TestClient, count_payments: Callable[[], int]
 ) -> None:
+    """Нагрузочная проверка: 10 одновременных запросов с одним ключом — один платёж, без 500.
+
+    Гонку «проверка → вставка» этот тест на PostgreSQL почти не воспроизводит: запрос быстрее
+    разброса между потоками. Её детерминированно проверяет
+    test_race_between_check_and_insert_returns_existing_payment.
+    """
     headers = {"Idempotency-Key": "order-42"}
     workers = 10
-    start = Barrier(workers)  # все потоки отправляют запрос одновременно — так гонка вероятнее
+    start = Barrier(workers)  # все потоки отправляют запрос одновременно
 
     def send(_: int) -> Response:
         start.wait()
